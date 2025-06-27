@@ -162,8 +162,8 @@ export default function MusicPage() {
         return smoothed;
     }
 
-    React.useEffect(() => {
-        if (mp3File && audioRef.current && canvasRef.current) {
+    function environmentSetup() {
+        if (mp3File && audioRef.current && canvasRef.current){
             const url = URL.createObjectURL(mp3File);
             audioRef.current.src = url;
             audioRef.current.play();
@@ -181,75 +181,83 @@ export default function MusicPage() {
             let audioSource = audioCtx.createMediaElementSource(audioRef.current);
             let analyser = audioCtx.createAnalyser();
             const biquadFilter = audioCtx.createBiquadFilter();
-            // biquadFilter.type = "lowpass";
-            // biquadFilter.frequency.setValueAtTime(1000, audioCtx.currentTime);
 
             audioSource.connect(analyser);
             audioSource.connect(biquadFilter);
             biquadFilter.connect(analyser);
             analyser.connect(audioCtx.destination);
             analyser.fftSize = 2048;
-            //half of fftSize
-            let bufferLength = analyser.frequencyBinCount;
-            let dataArray = new Uint8Array(bufferLength);
 
-            //define column char
-            let barWidth = canvas.width / bufferLength;
-            let soundBarArr = Array.from({ length: bufferLength }, () => (
-                new SoundWavePoint(barWidth)
-            ));
-
-            setInterval(() => {
-                analyser.getByteTimeDomainData(dataArray);
-                // store or process dataArray here
-            }, 150);
-
-            let lastTime = performance.now();
-            let frameCount = 0;
-            function animate(time: number) {
-                if (!ctx) return;
-                clearCanvas();
-                // console.log(dataArray);
-                dataArray = smooth(dataArray);
-                ctx.beginPath();
-                for (let i = 0; i < dataArray.length; i++) {
-
-                    soundBarArr[i].CalculateAcceleration(dataArray[i]);
-                    soundBarArr[i].UpdatePhysics();
-
-                    if (i == 0){
-                        soundBarArr[i].renderWave(ctx, i, canvas, 0);
-                        continue;
-                    }
-                    soundBarArr[i].renderWave(ctx, i, canvas, soundBarArr[i-1].GetPosition());
-                }
-                ctx.stroke();
-                ctx.closePath();
-
-
-                for (let i = 0; i < dataArray.length; i++) {
-
-                    soundBarArr[i].addVolume(ctx, canvas)
-                }
-
-                //count FPS
-                frameCount++;
-                const delta = time - lastTime;
-                if (delta >= 1000) {
-                    console.log('FPS:', frameCount);
-                    frameCount = 0;
-                    lastTime = time;
-                }
-
-                if (!audioRef.current?.paused) {
-                    requestAnimationFrame(animate);
-                }
-            }
-            requestAnimationFrame(animate);
-            return () => {
-                URL.revokeObjectURL(url);
-            };
+            return {analyser, canvas, container, ctx, url};
         }
+        return null;
+    }
+
+    function fpsCount(time: number, frameData:{lastTime: number, frameCount: number}) {
+        //count FPS
+        frameData.frameCount++;
+        const delta = time - frameData.lastTime;
+        if (delta >= 1000) {
+            console.log('FPS:', frameData.frameCount);
+            frameData.frameCount = 0;
+            frameData.lastTime = time;
+        }
+    }
+
+    React.useEffect(() => {
+        let environment = environmentSetup();
+        if (!environment) return;
+        let analyser = environment.analyser;
+        let canvas = environment.canvas;
+        let ctx = environment.ctx;
+        let url = environment.url;
+        let bufferLength = analyser.frequencyBinCount;
+        let dataArray = new Uint8Array(bufferLength);
+
+        //define column char
+        let barWidth = canvas.width / bufferLength;
+        let soundBarArr = Array.from({length: bufferLength}, () => (
+            new SoundWavePoint(barWidth)
+        ));
+
+        setInterval(() => {
+            analyser.getByteTimeDomainData(dataArray);
+            // store or process dataArray here
+        }, 150);
+
+        let lastTime = performance.now();
+        let frameCount = 0;
+        let frameData = {lastTime, frameCount};
+        function animate(time: number) {
+            if (!ctx) return;
+            clearCanvas();
+            // console.log(dataArray);
+            dataArray = smooth(dataArray);
+            ctx.beginPath();
+            for (let i = 0; i < dataArray.length; i++) {
+                soundBarArr[i].CalculateAcceleration(dataArray[i]);
+                soundBarArr[i].UpdatePhysics();
+                if (i == 0) {
+                    soundBarArr[i].renderWave(ctx, i, canvas, 0);
+                    continue;
+                }
+                soundBarArr[i].renderWave(ctx, i, canvas, soundBarArr[i - 1].GetPosition());
+            }
+            ctx.stroke();
+            ctx.closePath();
+            for (let i = 0; i < dataArray.length; i++) {
+                soundBarArr[i].addVolume(ctx, canvas)
+            }
+            fpsCount(time, frameData);
+            if (!audioRef.current?.paused) {
+                requestAnimationFrame(animate);
+            }
+        }
+
+        requestAnimationFrame(animate);
+        return () => {
+            URL.revokeObjectURL(url);
+        };
     }, [mp3File]);
 
     return (
